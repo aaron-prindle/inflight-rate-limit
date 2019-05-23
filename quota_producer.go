@@ -1,7 +1,9 @@
 package inflight
 
 import (
+	"fmt"
 	"sync"
+	"time"
 )
 
 type sharedQuotaNotification struct {
@@ -11,39 +13,52 @@ type sharedQuotaNotification struct {
 
 type reservedQuotaNotification struct {
 	priority         PriorityBand
-	bktName          string
+	queueName        string
 	quotaReleaseFunc func()
 }
 
 type quotaProducer struct {
-	lock           *sync.Mutex
-	bktByName      map[string]*Bucket
-	remainingQuota map[string]int
+	lock *sync.Mutex
+	// queueByName      map[string]*Queue
+	queues         []*Queue
+	remainingQuota map[int]int
+	// remainingQuota map[string]int
 }
 
-func (c *quotaProducer) Run(quotaProcessFunc func(bkt *Bucket, quotaReleaseFunc func())) {
+func (c *quotaProducer) Run(quotaProcessFunc func(queue *Queue, quotaReleaseFunc func())) {
+	time.Sleep(1 * time.Second)
 	for {
-		for name, bkt := range c.bktByName {
-			bkt := bkt
+		// fmt.Println("outer quota_producer.go ...")
+		for i, queue := range c.queues {
+			queue := queue
 			gotQuota := false
 			func() {
 				c.lock.Lock()
 				defer c.lock.Unlock()
-				if c.remainingQuota[name] > 0 {
-					c.remainingQuota[bkt.Name]--
+				fmt.Printf("c.remainingQuota[%d]: %d\n", i, c.remainingQuota[i])
+				if c.remainingQuota[i] > 0 {
+					// fmt.Println("reserving quota...")
+					c.remainingQuota[i]--
 					gotQuota = true
 				}
 			}()
 			if gotQuota {
 				quotaProcessFunc(
-					bkt,
+					queue,
 					func() {
 						c.lock.Lock()
 						defer c.lock.Unlock()
-						c.remainingQuota[bkt.Name]++
+						// fmt.Println("adding back quota...")
+						c.remainingQuota[i]++
 					})
 			}
 		}
 
 	}
+}
+
+func (c *quotaProducer) quotaincrement(i int) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.remainingQuota[i]++
 }

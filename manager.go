@@ -4,39 +4,7 @@ import (
 	"sync"
 )
 
-type reservedQuotaManager struct {
-	producer *quotaProducer
-	quotaCh  chan<- interface{}
-}
-
-func newReservedQuotaManager(quotaCh chan<- interface{}, bkts []*Bucket) *reservedQuotaManager {
-	mgr := &reservedQuotaManager{
-		producer: &quotaProducer{
-			lock:           &sync.Mutex{},
-			remainingQuota: make(map[string]int),
-			bktByName:      make(map[string]*Bucket),
-		},
-		quotaCh: quotaCh,
-	}
-	for _, bkt := range bkts {
-		bkt := bkt
-		mgr.producer.remainingQuota[bkt.Name] += bkt.ReservedQuota
-		mgr.producer.bktByName[bkt.Name] = bkt
-	}
-	return mgr
-}
-
-func (m *reservedQuotaManager) Run() {
-	go m.producer.Run(func(bkt *Bucket, quotaReleaseFunc func()) {
-		m.quotaCh <- reservedQuotaNotification{
-			priority:         bkt.Priority,
-			bktName:          bkt.Name,
-			quotaReleaseFunc: quotaReleaseFunc,
-		}
-	})
-}
-
-func newSharedQuotaManager(quotaCh chan<- interface{}, bkts []*Bucket) *sharedQuotaManager {
+func newSharedQuotaManager(quotaCh chan<- interface{}, queues []*Queue) *sharedQuotaManager {
 	mgr := &sharedQuotaManager{
 		producers: make(map[PriorityBand]*quotaProducer),
 		quotaCh:   quotaCh,
@@ -44,14 +12,13 @@ func newSharedQuotaManager(quotaCh chan<- interface{}, bkts []*Bucket) *sharedQu
 	for i := 0; i <= int(SystemLowestPriorityBand); i++ {
 		mgr.producers[PriorityBand(i)] = &quotaProducer{
 			lock:           &sync.Mutex{},
-			remainingQuota: make(map[string]int),
-			bktByName:      make(map[string]*Bucket),
+			remainingQuota: make(map[int]int),
+			queues:         queues,
 		}
 	}
-	for _, bkt := range bkts {
-		bkt := bkt
-		mgr.producers[bkt.Priority].remainingQuota[bkt.Name] += bkt.SharedQuota
-		mgr.producers[bkt.Priority].bktByName[bkt.Name] = bkt
+	for i, queue := range queues {
+		mgr.producers[queue.Priority].remainingQuota[i] += queue.SharedQuota
+		// mgr.producers[queue.Priority].queueByName[queue.Name] = queue
 	}
 	return mgr
 }
@@ -64,9 +31,8 @@ type sharedQuotaManager struct {
 func (m *sharedQuotaManager) Run() {
 	for _, producer := range m.producers {
 		producer := producer
-		go producer.Run(func(bkt *Bucket, quotaReleaseFunc func()) {
+		go producer.Run(func(queue *Queue, quotaReleaseFunc func()) {
 			m.quotaCh <- sharedQuotaNotification{
-				priority:         bkt.Priority,
 				quotaReleaseFunc: quotaReleaseFunc,
 			}
 		})

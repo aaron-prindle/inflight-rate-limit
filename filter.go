@@ -3,34 +3,51 @@ package inflight
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"sync"
 	"time"
 )
 
-type InflightRateLimitFilter struct {
+type FQFilter struct {
 	// list-watching API models
-	bucketsLister        []*Bucket
-	bucketBindingsLister []*BucketBinding
+	lock   *sync.Mutex
+	queues []*Queue
+	vt     uint64
+	C      uint64
+	G      uint64
+	seen   bool
 
 	// running components
-	*reservedQuotaManager
+	// *reservedQuotaManager
 	*sharedQuotaManager
 	*queueDrainer
 
 	Delegate http.HandlerFunc
 }
 
-func (f *InflightRateLimitFilter) Serve(resp http.ResponseWriter, req *http.Request) {
+func findMatchedQueue(req *http.Request, queues []*Queue) *Queue {
+	index := req.Header.Get("INDEX")
+	idx, err := strconv.Atoi(index)
+	if err != nil {
+		panic("strconv.Atoi(index)")
+	}
+	return queues[idx]
+}
+
+func (f *FQFilter) Serve(resp http.ResponseWriter, req *http.Request) {
 
 	// 0. Matching request w/ bindings API
-	matchedBkt := findMatchedBucket(req, f.bucketsLister, f.bucketBindingsLister)
+	matchedQueue := findMatchedQueue(req, f.queues)
 
 	// 1. Waiting to be notified by either a reserved quota or a shared quota
-	distributionCh := f.queueDrainer.Enqueue(matchedBkt)
+	distributionCh := f.queueDrainer.Enqueue(matchedQueue)
 	if distributionCh == nil {
 		// too many requests
+		fmt.Println("throttled...")
 		resp.WriteHeader(409)
 	}
 
+	// fmt.Println("serving...")
 	ticker := time.NewTicker(maxTimeout)
 	defer ticker.Stop()
 	select {
@@ -38,6 +55,7 @@ func (f *InflightRateLimitFilter) Serve(resp http.ResponseWriter, req *http.Requ
 		defer finishFunc()
 		f.Delegate(resp, req)
 	case <-ticker.C:
+		fmt.Println("timed out...")
 		resp.WriteHeader(409)
 	}
 
@@ -47,26 +65,17 @@ const (
 	maxTimeout = time.Minute * 10
 )
 
-func NewInflightRateLimitFilter(bkts []*Bucket, bindings []*BucketBinding) *InflightRateLimitFilter {
+func NewFQFilter(queues []*Queue) *FQFilter {
 
-	// 1. We add an logical extra bucket which holds the global extra shared quota to the list
-	bkts = append(bkts, ExtraBucket)
-
-	for _, bkt := range bkts {
-		fmt.Printf("*Bucket* %v: [RESERVED] %v, [SHARED] %v\n", bkt.Name, bkt.ReservedQuota, bkt.SharedQuota)
-	}
-
-	// 2. Initializing everything
+	// Initializing everything
 	quotaCh := make(chan interface{})
-	drainer := newQueueDrainer(bkts, quotaCh)
-	inflightFilter := &InflightRateLimitFilter{
-		bucketsLister:        bkts,
-		bucketBindingsLister: bindings,
+	drainer := newQueueDrainer(queues, quotaCh)
+	inflightFilter := &FQFilter{
+		queues: queues,
 
 		queueDrainer: drainer,
 
-		sharedQuotaManager:   newSharedQuotaManager(quotaCh, bkts),
-		reservedQuotaManager: newReservedQuotaManager(quotaCh, bkts),
+		sharedQuotaManager: newSharedQuotaManager(quotaCh, queues),
 
 		Delegate: func(resp http.ResponseWriter, req *http.Request) {
 			time.Sleep(time.Millisecond * 100) // assuming that it takes 100ms to finish the request
@@ -77,8 +86,7 @@ func NewInflightRateLimitFilter(bkts []*Bucket, bindings []*BucketBinding) *Infl
 	return inflightFilter
 }
 
-func (f *InflightRateLimitFilter) Run() {
-	go f.reservedQuotaManager.Run()
-	// go f.sharedQuotaManager.Run()
+func (f *FQFilter) Run() {
+	go f.sharedQuotaManager.Run()
 	go f.queueDrainer.Run()
 }
