@@ -4,25 +4,31 @@ import "time"
 
 type PriorityBand int
 
+// const (
+// 	SystemLowestPriorityBand = PriorityBand(iota)
+// )
+
+const SCL = 400
+
 const (
-	SystemLowestPriorityBand = PriorityBand(iota)
+	SystemTopPriorityBand = PriorityBand(iota)
+	SystemHighPriorityBand
+	SystemMediumPriorityBand
+	SystemNormalPorityBand
+	SystemLowPriorityBand
+
+	// This is an implicit priority that cannot be set via API
+	SystemLowestPriorityBand
 )
 
-// const (
-// 	SystemTopPriorityBand = PriorityBand(iota)
-// 	SystemLowestPriorityBand
-// )
-
-// const (
-// 	SystemTopPriorityBand = PriorityBand(iota)
-// 	SystemHighPriorityBand
-// 	SystemMediumPriorityBand
-// 	SystemNormalPorityBand
-// 	SystemLowPriorityBand
-
-// 	// This is an implicit priority that cannot be set via API
-// 	SystemLowestPriorityBand
-// )
+var Priorities = []PriorityBand{
+	SystemTopPriorityBand,
+	SystemHighPriorityBand,
+	SystemMediumPriorityBand,
+	SystemNormalPorityBand,
+	SystemLowPriorityBand,
+	SystemLowestPriorityBand,
+}
 
 // TODO(aaron-prindle) currently testing with one concurrent request
 const C = 1 // const C = 300
@@ -71,6 +77,19 @@ func InitQueues(n int) []*Queue {
 		queues = append(queues, &Queue{
 			Packets:     []*Packet{},
 			Priority:    SystemLowestPriorityBand,
+			SharedQuota: 10,
+		})
+	}
+	return queues
+}
+
+func InitQueuesPriority() []*Queue {
+	queues := make([]*Queue, 0, len(Priorities))
+
+	for _, priority := range Priorities {
+		queues = append(queues, &Queue{
+			Packets:     []*Packet{},
+			Priority:    priority,
 			SharedQuota: 10,
 		})
 	}

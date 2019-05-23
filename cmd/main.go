@@ -11,7 +11,8 @@ import (
 
 func main() {
 
-	queues := inflight.InitQueues(1)
+	queues := inflight.InitQueuesPriority()
+	// queues := inflight.InitQueues(10)
 	fqFilter := inflight.NewFQFilter(queues)
 
 	fqFilter.Run()

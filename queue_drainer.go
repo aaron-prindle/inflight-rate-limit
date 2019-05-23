@@ -10,7 +10,7 @@ import (
 )
 
 func newQueueDrainer(queues []*Queue, quotaCh <-chan interface{}) *queueDrainer {
-	// wrrQueueByPriority := make(map[PriorityBand]*WRRQueue)
+	fqSchedulerByPriority := make(map[PriorityBand]*FQScheduler)
 
 	totalSharedQuota := 0
 	sharedQuotaByPriority := make(map[PriorityBand]int)
@@ -20,11 +20,16 @@ func newQueueDrainer(queues []*Queue, quotaCh <-chan interface{}) *queueDrainer 
 		totalSharedQuota += queue.SharedQuota
 	}
 
+	for i := 0; i <= int(SystemLowestPriorityBand); i++ {
+		fqSchedulerByPriority[PriorityBand(i)] = NewFQScheduler(queues, clock.RealClock{})
+	}
+
 	drainer := &queueDrainer{
 		lock:           &sync.Mutex{},
 		maxQueueLength: totalSharedQuota,
-		fqscheduler:    NewFQScheduler(queues, clock.RealClock{}),
-		quotaCh:        quotaCh,
+		// fqscheduler:           NewFQScheduler(queues, clock.RealClock{}),
+		quotaCh:                 quotaCh,
+		fqSchedulerByPriorities: fqSchedulerByPriority,
 	}
 	return drainer
 }
@@ -33,11 +38,11 @@ type queueDrainer struct {
 	lock           *sync.Mutex
 	queueLength    int
 	maxQueueLength int
-	fqscheduler    *FQScheduler
+	// fqscheduler    *FQScheduler
 
 	quotaCh <-chan interface{}
 
-	// queueByPriorities map[PriorityBand]*FQScheduler
+	fqSchedulerByPriorities map[PriorityBand]*FQScheduler
 }
 
 func (d *queueDrainer) Run() {
@@ -52,28 +57,28 @@ func (d *queueDrainer) Run() {
 			func() {
 				d.lock.Lock()
 				defer d.lock.Unlock()
-				// for j := int(SystemTopPriorityBand); j <= int(quota.priority); j++ {
-				// fmt.Println("in queue_drainer...")
-				distributionCh := d.fqscheduler.Dequeue()
-				// distributionCh := d.PopByPriority(quota.priority)
-				if distributionCh != nil {
-					go func() {
-						fmt.Println("distributed.")
-						distributionCh <- quota.quotaReleaseFunc
-					}()
-					d.queueLength--
-					return
+				for j := int(SystemTopPriorityBand); j <= int(quota.priority); j++ {
+					// fmt.Println("in queue_drainer...")
+					// distributionCh := d.fqscheduler.Dequeue()
+					distributionCh := d.PopByPriority(quota.priority)
+					if distributionCh != nil {
+						go func() {
+							fmt.Println("distributed.")
+							distributionCh <- quota.quotaReleaseFunc
+						}()
+						d.queueLength--
+						return
+					}
 				}
-				// }
 				quota.quotaReleaseFunc()
 			}()
 		}
 	}
 }
 
-// func (d *queueDrainer) PopByPriority(band PriorityBand) (releaseQuotaFuncCh chan<- func()) {
-// 	return d.queueByPriorities[band].Dequeue()
-// }
+func (d *queueDrainer) PopByPriority(band PriorityBand) (releaseQuotaFuncCh chan<- func()) {
+	return d.fqSchedulerByPriorities[band].Dequeue()
+}
 
 func (d *queueDrainer) Enqueue(queue *Queue) <-chan func() {
 	d.lock.Lock()
@@ -87,7 +92,7 @@ func (d *queueDrainer) Enqueue(queue *Queue) <-chan func() {
 	pkt := &Packet{
 		queueidx: 0,
 	}
-	d.fqscheduler.Enqueue(pkt, distributionCh)
+	d.fqSchedulerByPriorities[queue.Priority].Enqueue(pkt, distributionCh)
 	return distributionCh
 }
 
