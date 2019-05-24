@@ -12,37 +12,32 @@ import (
 func newQueueDrainer(queues []*Queue, quotaCh <-chan interface{}) *queueDrainer {
 	fqSchedulerByPriority := make(map[PriorityBand]*FQScheduler)
 
-	totalSharedQuota := 0
 	sharedQuotaByPriority := make(map[PriorityBand]int)
-	for _, queue := range queues {
-		queue := queue
-		sharedQuotaByPriority[queue.Priority] += queue.SharedQuota
-		totalSharedQuota += queue.SharedQuota
+	for _, priority := range Priorities {
+		sharedQuotaByPriority[priority] += ACV(priority, queues)
+		// sharedQuotaByPriority[priority] += ACS(priority, queues)
 	}
 
 	for i := 0; i <= int(SystemLowestPriorityBand); i++ {
-		fqSchedulerByPriority[PriorityBand(i)] = NewFQScheduler(queues, clock.RealClock{})
+		// TODO(aaron-prindle) this is ok for now...
+		fqSchedulerByPriority[PriorityBand(i)] = NewFQScheduler([]*Queue{queues[i]}, clock.RealClock{})
 	}
 
 	drainer := &queueDrainer{
-		lock:           &sync.Mutex{},
-		maxQueueLength: totalSharedQuota,
-		// fqscheduler:           NewFQScheduler(queues, clock.RealClock{}),
+		lock:                    &sync.Mutex{},
 		quotaCh:                 quotaCh,
 		fqSchedulerByPriorities: fqSchedulerByPriority,
+		sharedQuotaByPriority:   sharedQuotaByPriority,
 	}
 	return drainer
 }
 
 type queueDrainer struct {
-	lock           *sync.Mutex
-	queueLength    int
-	maxQueueLength int
-	// fqscheduler    *FQScheduler
-
-	quotaCh <-chan interface{}
-
+	lock                    *sync.Mutex
+	queueLength             int
+	quotaCh                 <-chan interface{}
 	fqSchedulerByPriorities map[PriorityBand]*FQScheduler
+	sharedQuotaByPriority   map[PriorityBand]int
 }
 
 func (d *queueDrainer) Run() {
@@ -57,18 +52,14 @@ func (d *queueDrainer) Run() {
 			func() {
 				d.lock.Lock()
 				defer d.lock.Unlock()
-				for j := int(SystemTopPriorityBand); j <= int(quota.priority); j++ {
-					// fmt.Println("in queue_drainer...")
-					// distributionCh := d.fqscheduler.Dequeue()
-					distributionCh := d.PopByPriority(quota.priority)
-					if distributionCh != nil {
-						go func() {
-							fmt.Println("distributed.")
-							distributionCh <- quota.quotaReleaseFunc
-						}()
-						d.queueLength--
-						return
-					}
+				distributionCh := d.fqSchedulerByPriorities[quota.priority].Dequeue()
+				if distributionCh != nil {
+					go func() {
+						fmt.Println("distributed.")
+						distributionCh <- quota.quotaReleaseFunc
+					}()
+					d.queueLength--
+					return
 				}
 				quota.quotaReleaseFunc()
 			}()
@@ -76,14 +67,17 @@ func (d *queueDrainer) Run() {
 	}
 }
 
-func (d *queueDrainer) PopByPriority(band PriorityBand) (releaseQuotaFuncCh chan<- func()) {
-	return d.fqSchedulerByPriorities[band].Dequeue()
-}
+// func (d *queueDrainer) PopByPriority(band PriorityBand) (releaseQuotaFuncCh chan<- func()) {
+// 	return d.fqSchedulerByPriorities[band].Dequeue()
+// }
 
 func (d *queueDrainer) Enqueue(queue *Queue) <-chan func() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	if d.queueLength > d.maxQueueLength {
+	fmt.Printf("d.queueLength: %d\n", d.queueLength)
+	fmt.Printf("d.sharedQuotaByPriority: %d\n", d.sharedQuotaByPriority)
+	if d.queueLength > d.sharedQuotaByPriority[queue.Priority] {
+		fmt.Println("d.queueLength > d.sharedQuotaByPriority: true")
 		return nil
 	}
 	// Prioritizing
@@ -166,7 +160,7 @@ func (q *FQScheduler) getvirtualtimeratio() float64 {
 	for _, queue := range q.queues {
 		reqs += queue.RequestsExecuting
 		// It might be best to delete this line. If everything is working
-		//  correctly, there will be no waiting packets if reqs < C on current
+		//  correctly, there will be no waiting packets if reqs < SCL on current
 		//  line 85; if something is going wrong, it is more accurate to say
 		// that virtual time advanced due to the requests actually executing.
 
@@ -179,7 +173,7 @@ func (q *FQScheduler) getvirtualtimeratio() float64 {
 	if NEQ == 0 {
 		return 0
 	}
-	return min(float64(reqs), float64(C)) / float64(NEQ)
+	return min(float64(reqs), float64(SCL)) / float64(NEQ)
 }
 
 func (q *FQScheduler) updateTime(packet *Packet, queue *Queue) {
@@ -235,9 +229,14 @@ func (q *FQScheduler) Dequeue() (distributionCh chan<- func()) {
 		packet.startTime = q.clock.Now()
 		// request dequeued, service has started
 		queue.RequestsExecuting++
+	} else {
+		return nil
 	}
 	// dequeue
 	id := packet.queueidx
+	fmt.Printf("queue: %v\n", queue)
+	fmt.Printf("packet: %v\n", packet)
+	fmt.Printf("len(q.queuedistchs): %d\n", len(q.queuedistchs))
 	distributionCh, q.queuedistchs[id] = q.queuedistchs[id][0].(chan<- func()), q.queuedistchs[id][1:]
 	return distributionCh
 	// return packet, ok

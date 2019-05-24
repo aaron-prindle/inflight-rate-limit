@@ -8,7 +8,8 @@ type PriorityBand int
 // 	SystemLowestPriorityBand = PriorityBand(iota)
 // )
 
-const SCL = 400
+const SCL = 400 // SCL is the apiserver's concurrency limit and ACS(l) is the
+// const SCL = 400 // SCL is the apiserver's concurrency limit and ACS(l) is the
 
 const (
 	SystemTopPriorityBand = PriorityBand(iota)
@@ -29,9 +30,6 @@ var Priorities = []PriorityBand{
 	SystemLowPriorityBand,
 	SystemLowestPriorityBand,
 }
-
-// TODO(aaron-prindle) currently testing with one concurrent request
-const C = 1 // const C = 300
 
 const G = 100000 //   100000 nanoseconds = .1 milliseconds || const G = 60000000000 nanoseconds = 1 minute
 

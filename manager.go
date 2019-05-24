@@ -1,8 +1,12 @@
 package inflight
 
 import (
+	"fmt"
 	"sync"
 )
+
+// quota producer per prioritylevel
+// concurrency is per level, not bucket
 
 func newSharedQuotaManager(quotaCh chan<- interface{}, queues []*Queue) *sharedQuotaManager {
 	mgr := &sharedQuotaManager{
@@ -11,15 +15,17 @@ func newSharedQuotaManager(quotaCh chan<- interface{}, queues []*Queue) *sharedQ
 	}
 	for i := 0; i <= int(SystemLowestPriorityBand); i++ {
 		mgr.producers[PriorityBand(i)] = &quotaProducer{
-			lock:           &sync.Mutex{},
-			remainingQuota: make(map[int]int),
-			queues:         queues,
+			lock:     &sync.Mutex{},
+			queues:   queues,
+			priority: PriorityBand(i),
 		}
 	}
-	for i, queue := range queues {
-		mgr.producers[queue.Priority].remainingQuota[i] += queue.SharedQuota
-		// mgr.producers[queue.Priority].queueByName[queue.Name] = queue
+
+	// TODO(aaron-prindle) FIX - this needs to be dynamic...
+	for _, prioritylvl := range Priorities {
+		mgr.producers[prioritylvl].remainingQuota += ACV(prioritylvl, mgr.producers[prioritylvl].queues)
 	}
+
 	return mgr
 }
 
@@ -29,10 +35,12 @@ type sharedQuotaManager struct {
 }
 
 func (m *sharedQuotaManager) Run() {
-	for _, producer := range m.producers {
+	for i, producer := range m.producers {
 		producer := producer
-		go producer.Run(func(queue *Queue, quotaReleaseFunc func()) {
+		fmt.Printf("producer[%d] starting...\n", i)
+		go producer.Run(func(quotaReleaseFunc func()) {
 			m.quotaCh <- sharedQuotaNotification{
+				priority:         producer.priority,
 				quotaReleaseFunc: quotaReleaseFunc,
 			}
 		})
