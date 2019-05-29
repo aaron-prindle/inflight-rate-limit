@@ -36,10 +36,9 @@ func (q *FQScheduler) chooseQueue(packet *Packet) *Queue {
 
 func NewFQScheduler(queues []*Queue, clock clock.Clock) *FQScheduler {
 	fq := &FQScheduler{
-		queues: queues,
-		clock:  clock,
-		vt:     0,
-		// --
+		queues:       queues,
+		clock:        clock,
+		vt:           0,
 		queuedistchs: make(map[int][]interface{}),
 	}
 	return fq
@@ -49,8 +48,18 @@ func (q *FQScheduler) nowAsUnixNano() float64 {
 	return float64(q.clock.Now().UnixNano())
 }
 
+func (q *FQScheduler) Enqueue(queue *Queue) <-chan func() {
+	distributionCh := make(chan func(), 1)
+	pkt := &Packet{
+		// TODO(aaron-prindle) FIX TO BE CORRECT
+		queueidx: 0,
+	}
+	q.enqueue(pkt, distributionCh)
+	return distributionCh
+}
+
 // Enqueue enqueues a packet into the fair queuing scheduler
-func (q *FQScheduler) Enqueue(packet *Packet, distributionCh chan<- func()) {
+func (q *FQScheduler) enqueue(packet *Packet, distributionCh chan<- func()) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 	q.synctime()
@@ -78,12 +87,6 @@ func (q *FQScheduler) getvirtualtimeratio() float64 {
 	reqs := 0
 	for _, queue := range q.queues {
 		reqs += queue.RequestsExecuting
-		// It might be best to delete this line. If everything is working
-		//  correctly, there will be no waiting packets if reqs < SCL on current
-		//  line 85; if something is going wrong, it is more accurate to say
-		// that virtual time advanced due to the requests actually executing.
-
-		// reqs += len(queue.Packets)
 		if len(queue.Packets) > 0 || queue.RequestsExecuting > 0 {
 			NEQ++
 		}
@@ -159,7 +162,6 @@ func (q *FQScheduler) Dequeue() (distributionCh chan<- func(), packet *Packet) {
 	distributionCh = q.queuedistchs[id][0].(chan<- func())
 	q.queuedistchs[id] = q.queuedistchs[id][1:]
 	return distributionCh, packet
-	// return packet, ok
 }
 
 func (q *FQScheduler) roundrobinqueue() int {

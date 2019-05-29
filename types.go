@@ -19,11 +19,11 @@ const (
 
 var Priorities = []PriorityBand{
 	SystemTopPriorityBand,
-	SystemHighPriorityBand,
-	SystemMediumPriorityBand,
-	SystemNormalPorityBand,
-	SystemLowPriorityBand,
-	SystemLowestPriorityBand,
+	// SystemHighPriorityBand,
+	// SystemMediumPriorityBand,
+	// SystemNormalPorityBand,
+	// SystemLowPriorityBand,
+	// SystemLowestPriorityBand,
 }
 
 const G = 100000 //   100000 nanoseconds = .1 milliseconds || const G = 60000000000 nanoseconds = 1 minute

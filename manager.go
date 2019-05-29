@@ -2,32 +2,42 @@ package inflight
 
 import (
 	"fmt"
+
+	"k8s.io/utils/clock"
 )
 
-type sharedQuotaManager struct {
-	producers map[PriorityBand]*quotaProducer
+type sharedDispatcher struct {
+	producers map[PriorityBand]*Dispatcher
 }
 
-func newSharedQuotaManager(quotaCh chan<- interface{}, queues []*Queue, qd *queueDrainer) *sharedQuotaManager {
-	mgr := &sharedQuotaManager{
-		producers: make(map[PriorityBand]*quotaProducer),
+func queuesForPriority(priority PriorityBand, queues []*Queue) []*Queue {
+	// TODO(aaron-prindle) change this to actual impl
+	return []*Queue{queues[priority]}
+}
+
+func newSharedDispatcher(queues []*Queue) *sharedDispatcher {
+
+	mgr := &sharedDispatcher{
+		producers: make(map[PriorityBand]*Dispatcher),
 	}
-	for i := 0; i <= int(SystemLowestPriorityBand); i++ {
-		mgr.producers[PriorityBand(i)] = &quotaProducer{
-			queues:   queues,
-			priority: PriorityBand(i),
-			qd:       qd,
+
+	clock := clock.RealClock{}
+	for _, priority := range Priorities {
+		mgr.producers[priority] = &Dispatcher{
+			queues:      queues,
+			ACV:         ACV(priority, queues),
+			fqScheduler: NewFQScheduler(queuesForPriority(priority, queues), clock),
 		}
 	}
 	// TODO(aaron-prindle) FIX - this needs to be dynamic...
-	for _, prioritylvl := range Priorities {
-		mgr.producers[prioritylvl].remainingQuota += ACV(prioritylvl, mgr.producers[prioritylvl].queues)
+	for _, priority := range Priorities {
+		mgr.producers[priority].ACV += ACV(priority, mgr.producers[priority].queues)
 	}
 
 	return mgr
 }
 
-func (m *sharedQuotaManager) Run() {
+func (m *sharedDispatcher) Run() {
 	for i, producer := range m.producers {
 		producer := producer
 		fmt.Printf("producer[%d] starting...\n", i)

@@ -13,8 +13,7 @@ type FQFilter struct {
 	lock   *sync.Mutex
 	queues []*Queue
 
-	*sharedQuotaManager
-	*queueDrainer
+	*sharedDispatcher
 
 	Matcher  func(*http.Request, []*Queue) *Queue
 	Delegate http.HandlerFunc
@@ -26,15 +25,21 @@ func (f *FQFilter) Serve(resp http.ResponseWriter, req *http.Request) {
 	matchedQueue := f.Matcher(req, f.queues)
 
 	// 1. Waiting to be notified by either a reserved quota or a shared quota
-	fmt.Println("1")
-	distributionCh := f.queueDrainer.Enqueue(matchedQueue)
+	dispatcher := f.sharedDispatcher.producers[matchedQueue.Priority]
+	distributionCh := dispatcher.fqScheduler.Enqueue(matchedQueue)
+
 	if distributionCh == nil {
 		// too many requests
 		fmt.Println("throttled...")
 		resp.WriteHeader(http.StatusConflict)
 	}
-	fmt.Println("2")
-	// fmt.Println("serving...")
+	// TODO(aaron-prindle) do this better ....
+	func() {
+		dispatcher.lock.Lock()
+		defer dispatcher.lock.Unlock()
+		dispatcher.requestsexecuting++
+	}()
+
 	select {
 	case finishFunc := <-distributionCh:
 		defer finishFunc()
@@ -46,15 +51,11 @@ func (f *FQFilter) Serve(resp http.ResponseWriter, req *http.Request) {
 }
 
 func NewFQFilter(queues []*Queue) *FQFilter {
-
 	// Initializing everything
-	quotaCh := make(chan interface{})
-	drainer := newQueueDrainer(queues, quotaCh)
 	inflightFilter := &FQFilter{
-		queues:             queues,
-		queueDrainer:       drainer,
-		sharedQuotaManager: newSharedQuotaManager(quotaCh, queues, drainer),
-		Matcher:            findMatchedQueue,
+		queues:           queues,
+		sharedDispatcher: newSharedDispatcher(queues),
+		Matcher:          findMatchedQueue,
 		Delegate: func(resp http.ResponseWriter, req *http.Request) {
 			time.Sleep(time.Millisecond * 100) // assuming that it takes 100ms to finish the request
 			resp.Write([]byte("success!\n"))
@@ -65,7 +66,7 @@ func NewFQFilter(queues []*Queue) *FQFilter {
 }
 
 func (f *FQFilter) Run() {
-	go f.sharedQuotaManager.Run()
+	go f.sharedDispatcher.Run()
 }
 
 func findMatchedQueue(req *http.Request, queues []*Queue) *Queue {
