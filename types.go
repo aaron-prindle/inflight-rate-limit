@@ -4,12 +4,7 @@ import "time"
 
 type PriorityBand int
 
-// const (
-// 	SystemLowestPriorityBand = PriorityBand(iota)
-// )
-
-const SCL = 400 // SCL is the apiserver's concurrency limit and ACS(l) is the
-// const SCL = 400 // SCL is the apiserver's concurrency limit and ACS(l) is the
+const SCL = 400 // SCL is the apiserver's concurrency limit
 
 const (
 	SystemTopPriorityBand = PriorityBand(iota)
@@ -69,18 +64,7 @@ func (q *Queue) Dequeue() (*Packet, bool) {
 }
 
 // InitQueues is a convenience method for initializing an array of n queues
-func InitQueues(n int) []*Queue {
-	queues := make([]*Queue, 0, n)
-	for i := 0; i < n; i++ {
-		queues = append(queues, &Queue{
-			Packets:     []*Packet{},
-			Priority:    SystemLowestPriorityBand,
-			SharedQuota: 10,
-		})
-	}
-	return queues
-}
-
+// for the full list of priorities
 func InitQueuesPriority() []*Queue {
 	queues := make([]*Queue, 0, len(Priorities))
 
