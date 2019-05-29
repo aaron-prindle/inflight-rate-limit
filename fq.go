@@ -54,6 +54,7 @@ func (q *FQScheduler) Enqueue(queue *Queue) <-chan func() {
 		// TODO(aaron-prindle) FIX TO BE CORRECT
 		queueidx: 0,
 	}
+	// TODO(aaron-prindle) make it so enqueue fails if the queues are full
 	q.enqueue(pkt, distributionCh)
 	return distributionCh
 }
@@ -106,13 +107,6 @@ func (q *FQScheduler) updateTime(packet *Packet, queue *Queue) {
 		queue.virstart = q.getVirtualTime()
 	}
 }
-
-// FinishPacketAndDequeue is a convenience method used using the FQScheduler
-// at the concurrency limit
-// func (q *FQScheduler) FinishPacketAndDeque(p *Packet) (*Packet, bool) {
-// 	q.FinishPacket(p)
-// 	return q.Dequeue()
-// }
 
 // FinishPacket is a callback that should be used when a previously dequeud packet
 // has completed it's service.  This callback updates imporatnt state in the

@@ -21,28 +21,35 @@ type FQFilter struct {
 
 func (f *FQFilter) Serve(resp http.ResponseWriter, req *http.Request) {
 
-	// 0. Matching request w/ bindings API
 	matchedQueue := f.Matcher(req, f.queues)
 
-	// 1. Waiting to be notified by either a reserved quota or a shared quota
 	dispatcher := f.sharedDispatcher.producers[matchedQueue.Priority]
-	distributionCh := dispatcher.fqScheduler.Enqueue(matchedQueue)
-
-	if distributionCh == nil {
-		// too many requests
-		fmt.Println("throttled...")
-		resp.WriteHeader(http.StatusConflict)
-	}
-	// TODO(aaron-prindle) do this better ....
 	func() {
 		dispatcher.lock.Lock()
 		defer dispatcher.lock.Unlock()
-		dispatcher.requestsexecuting++
+		if dispatcher.requestsexecuting > dispatcher.ACV {
+			// too many requests
+			fmt.Println("throttled...")
+			resp.WriteHeader(http.StatusConflict)
+			return
+		}
 	}()
-
+	distributionCh := dispatcher.fqScheduler.Enqueue(matchedQueue)
+	if distributionCh == nil {
+		// queues are full
+		fmt.Println("throttled...")
+		resp.WriteHeader(http.StatusConflict)
+		return
+	}
 	select {
 	case finishFunc := <-distributionCh:
+		func() {
+			dispatcher.lock.Lock()
+			defer dispatcher.lock.Unlock()
+			dispatcher.requestsexecuting++
+		}()
 		defer finishFunc()
+
 		f.Delegate(resp, req)
 	// supports the timeout handlers context
 	case <-req.Context().Done():
