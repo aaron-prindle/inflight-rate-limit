@@ -51,8 +51,7 @@ func (q *FQScheduler) nowAsUnixNano() float64 {
 func (q *FQScheduler) Enqueue(queue *Queue) <-chan func() {
 	distributionCh := make(chan func(), 1)
 	pkt := &Packet{
-		// TODO(aaron-prindle) FIX TO BE CORRECT
-		queueidx: 0,
+		queueidx: queue.Index,
 	}
 	// TODO(aaron-prindle) make it so enqueue fails if the queues are full
 	q.enqueue(pkt, distributionCh)

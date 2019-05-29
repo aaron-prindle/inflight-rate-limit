@@ -19,6 +19,7 @@ func ACS(pl PriorityBand, queues []*Queue) int {
 	return assuredconcurrencyshares
 }
 
+// TODO(aaron-prindle) verify this is correct, i would think sum[prioity levels k]ACV(k) == SCL
 func ACV(pl PriorityBand, queues []*Queue) int {
 	// ACV(l) = ceil( SCL * ACS(l) / ( sum[priority levels k] ACS(k) ) )
 	denom := 0

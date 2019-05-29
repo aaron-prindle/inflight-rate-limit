@@ -46,6 +46,7 @@ type Queue struct {
 	RequestsExecuting int
 	Priority          PriorityBand
 	SharedQuota       int
+	Index             int
 }
 
 // Enqueue enqueues a packet into the queue
@@ -68,11 +69,12 @@ func (q *Queue) Dequeue() (*Packet, bool) {
 func InitQueuesPriority() []*Queue {
 	queues := make([]*Queue, 0, len(Priorities))
 
-	for _, priority := range Priorities {
+	for i, priority := range Priorities {
 		queues = append(queues, &Queue{
 			Packets:     []*Packet{},
 			Priority:    priority,
 			SharedQuota: 10,
+			Index:       i,
 		})
 	}
 	return queues
