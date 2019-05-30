@@ -64,22 +64,6 @@ func (q *Queue) Dequeue() (*Packet, bool) {
 	return packet, true
 }
 
-// InitQueues is a convenience method for initializing an array of n queues
-// for the full list of priorities
-func InitQueuesPriority() []*Queue {
-	queues := make([]*Queue, 0, len(Priorities))
-
-	for i, priority := range Priorities {
-		queues = append(queues, &Queue{
-			Packets:     []*Packet{},
-			Priority:    priority,
-			SharedQuota: 10,
-			Index:       i,
-		})
-	}
-	return queues
-}
-
 // VirtualFinish returns the expected virtual finish time of the Jth packet in the queue
 func (q *Queue) VirtualFinish(J int) float64 {
 	// The virtual finish time of request number J in the queue
